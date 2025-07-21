@@ -108,7 +108,10 @@ fn runFilesystemTests(allocator: std.mem.Allocator) !void {
     defer fs.close(handle) catch {};
 
     const test_data = "CoreSim test data";
-    _ = try fs.write(handle, test_data);
+    const bytes_written = try fs.write(handle, test_data);
+    if (bytes_written != test_data.len) {
+        return error.IncompleteWrite;
+    }
     try fs.flush(handle);
 
     std.debug.print("  ✓ Filesystem tests passed\n", .{});

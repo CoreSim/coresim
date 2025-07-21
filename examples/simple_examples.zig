@@ -97,8 +97,8 @@ const MessageQueue = struct {
     }
 
     pub fn size(self: *@This(), _: []const u8) ?[]const u8 {
-        _ = self;
-        return "queue_size";
+        // Return simple size indication based on actual queue state
+        return if (self.messages.items.len == 0) "empty" else "has_items";
     }
 
     pub fn checkMemory(self: *@This()) bool {
@@ -228,8 +228,10 @@ const SimpleCache = struct {
     }
 
     pub fn stats(self: *@This(), _: []const u8) ?[]const u8 {
-        _ = self;
-        return "cache_stats";
+        // Return simple stats based on actual cache state
+        const total_requests = self.hit_count + self.miss_count;
+        if (total_requests == 0) return "no_requests";
+        return if (self.hit_count > self.miss_count) "mostly_hits" else "mostly_misses";
     }
 
     pub fn clear(self: *@This()) !void {
@@ -353,8 +355,9 @@ const Counter = struct {
         self.value = 0;
     }
     pub fn get(self: *@This(), _: []const u8) ?[]const u8 {
-        _ = self;
-        return "counter_value";
+        // Return simple value indication based on actual counter state
+        if (self.value == 0) return "zero";
+        return if (self.value > 0) "positive" else "negative";
     }
 
     pub fn validate(self: *@This()) bool {

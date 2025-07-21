@@ -364,15 +364,13 @@ pub fn TestBuilder(comptime SystemType: type) type {
         }
 
         /// Set up global failure context for use by system methods
-        fn setup_global_failure_context(self: Self, failure_config: *failure_injection.FailureInjectionConfig, prng: *std.Random.DefaultPrng) void {
-            _ = self;
+        fn setup_global_failure_context(_: Self, failure_config: *failure_injection.FailureInjectionConfig, prng: *std.Random.DefaultPrng) void {
             current_failure_config = failure_config;
             current_prng = prng;
         }
 
         /// Clean up global failure context
-        fn cleanup_global_failure_context(self: Self) void {
-            _ = self;
+        fn cleanup_global_failure_context(_: Self) void {
             current_failure_config = null;
             current_prng = null;
             current_failure_stats = null;
@@ -531,19 +529,11 @@ test "One-liner test" {
             return @This(){ .allocator = allocator };
         }
 
-        pub fn deinit(self: *@This()) void {
-            _ = self;
-        }
+        pub fn deinit(_: *@This()) void {}
 
-        pub fn put(self: *@This(), key: []const u8, value: []const u8) !void {
-            _ = self;
-            _ = key;
-            _ = value;
-        }
+        pub fn put(_: *@This(), _: []const u8, _: []const u8) !void {}
 
-        pub fn get(self: *@This(), key: []const u8) ?[]const u8 {
-            _ = self;
-            _ = key;
+        pub fn get(_: *@This(), _: []const u8) ?[]const u8 {
             return null;
         }
     };
@@ -571,21 +561,15 @@ test "Custom invariants functionality" {
             _ = self;
         }
 
-        pub fn increment(self: *@This(), key: []const u8, value: []const u8) !void {
-            _ = key;
-            _ = value;
+        pub fn increment(self: *@This(), _: []const u8, _: []const u8) !void {
             self.counter += 1;
         }
 
-        pub fn decrement(self: *@This(), key: []const u8, value: []const u8) !void {
-            _ = key;
-            _ = value;
+        pub fn decrement(self: *@This(), _: []const u8, _: []const u8) !void {
             if (self.counter > 0) self.counter -= 1;
         }
 
-        pub fn reset(self: *@This(), key: []const u8, value: []const u8) !void {
-            _ = key;
-            _ = value;
+        pub fn reset(self: *@This(), _: []const u8, _: []const u8) !void {
             self.counter = 0;
         }
 

@@ -55,11 +55,7 @@ const Database = struct {
         _ = self.data.get(key) orelse return error.NotFound;
     }
 
-    pub fn flush(self: *Database, key: []const u8, value: []const u8) !void {
-        _ = self;
-        _ = key;
-        _ = value;
-
+    pub fn flush(_: *Database, _: []const u8, _: []const u8) !void {
         // Set system condition during flush operations
         coresim.set_system_condition(.during_flush);
         defer coresim.set_system_condition(null);
