@@ -1,0 +1,14 @@
+.{
+    .name = .coresim,
+    .version = "0.1.0",
+    .fingerprint = 0x80f19b155d4f86d4,
+    .minimum_zig_version = "0.14.1",
+
+    .dependencies = .{},
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
