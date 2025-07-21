@@ -172,6 +172,7 @@ pub fn main() !void {
         .custom_failures(&db_failures)
         .iterations(100)
         .named("database_failures_test")
+        .invariant("consistency", DatabaseSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Database failure types test passed!\n\n", .{});
@@ -190,6 +191,7 @@ pub fn main() !void {
         .custom_failures(&cache_failures)
         .iterations(150)
         .named("cache_failures_test")
+        .invariant("consistency", DatabaseSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Cache failure types test passed!\n\n", .{});
@@ -208,6 +210,7 @@ pub fn main() !void {
         .custom_failures(&backup_failures)
         .iterations(80)
         .named("backup_failures_test")
+        .invariant("consistency", DatabaseSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Backup failure types test passed!\n\n", .{});
@@ -238,6 +241,7 @@ pub fn main() !void {
         .variable_size_values(16, 128)
         .iterations(200)
         .named("combined_failures_test")
+        .invariant("consistency", DatabaseSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Combined failures test passed!\n\n", .{});
@@ -257,6 +261,7 @@ pub fn main() !void {
         .custom_failures(&stress_failures)
         .iterations(50)
         .named("stress_failures_test")
+        .invariant("consistency", DatabaseSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Stress failure test passed!\n\n", .{});

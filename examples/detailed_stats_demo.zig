@@ -141,6 +141,8 @@ pub fn main() !void {
         .iterations(50)
         .sequence_length(20, 50)
         .detailed_stats(true)
+        .invariant("consistency", AnalyticsDatabase.checkConsistency, .critical)
+        .invariant("memory", AnalyticsDatabase.checkMemory, .critical)
         .run_with_stats(allocator);
     defer basic_stats.deinit();
 
@@ -164,6 +166,8 @@ pub fn main() !void {
         .sequence_length(50, 100)
         .operation_weights(&workload_weights)
         .detailed_stats(true)
+        .invariant("consistency", AnalyticsDatabase.checkConsistency, .critical)
+        .invariant("memory", AnalyticsDatabase.checkMemory, .critical)
         .run_with_stats(allocator);
     defer workload_stats.deinit();
 
@@ -193,6 +197,8 @@ pub fn main() !void {
         .conditional_multipliers(&performance_multipliers)
         .detailed_stats(true)
         .variable_size_values(100, 2000) // Variable payload sizes
+        .invariant("consistency", AnalyticsDatabase.checkConsistency, .critical)
+        .invariant("memory", AnalyticsDatabase.checkMemory, .critical)
         .run_with_stats(allocator);
     defer performance_stats.deinit();
 
@@ -229,6 +235,8 @@ pub fn main() !void {
         .random_keys(8, 32)
         .variable_size_values(64, 1024)
         .seed(98765)
+        .invariant("consistency", AnalyticsDatabase.checkConsistency, .critical)
+        .invariant("memory", AnalyticsDatabase.checkMemory, .critical)
         .run_with_stats(allocator);
     defer comprehensive_stats.deinit();
 

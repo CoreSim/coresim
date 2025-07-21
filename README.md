@@ -12,16 +12,16 @@ const coresim = @import("coresim");
 
 const MyCache = struct {
     data: std.HashMap([]const u8, []const u8, ...),
-    
+
     pub const Operation = enum { put, get, delete };
-    
+
     pub fn init(allocator: std.mem.Allocator) !@This() { /* ... */ }
     pub fn deinit(self: *@This()) void { /* ... */ }
-    
+
     pub fn put(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
     pub fn get(self: *@This(), key: []const u8) ?[]const u8 { /* ... */ }
     pub fn delete(self: *@This(), key: []const u8) bool { /* ... */ }
-    
+
     pub fn checkConsistency(self: *@This()) bool { /* your invariants */ }
 };
 
@@ -30,6 +30,7 @@ const builder = coresim.TestBuilder(MyCache){};
 try builder
     .operations(&[_]MyCache.Operation{ .put, .get, .delete })
     .iterations(100)
+    .invariant("consistency", MyCache.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -41,7 +42,7 @@ try builder
 
 ## Features
 
-- **Flexible Configuration**: Configure all testing parameters explicitly for your use case
+- **Flexible Configuration**: Configure all testing parameters for your use case
 - **Property-Based Testing**: Generate randomized test sequences with configurable distributions
 - **Failure Injection**: Inject failures with conditional multipliers based on system state
 - **Filesystem Simulation**: Abstract filesystem interface with controllable error injection
@@ -54,13 +55,30 @@ try builder
 CoreSim offers multiple testing approaches - **see the [API Reference](docs/api-reference.md) for complete documentation**:
 
 ```zig
-// TestBuilder API - explicit configuration for your specific needs
-// Fast development testing
+const MySystem = struct {
+    pub const Operation = enum { create, read, update, delete };
+
+    pub fn init(allocator: std.mem.Allocator) !@This() { /* ... */ }
+    pub fn deinit(self: *@This()) void { /* ... */ }
+
+    // Method names must match operation enum values
+    pub fn create(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
+    pub fn read(self: *@This(), key: []const u8) ?[]const u8 { /* ... */ }
+    pub fn update(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
+    pub fn delete(self: *@This(), key: []const u8) bool { /* ... */ }
+
+    // Invariant functions (optional - use with .invariant() method)
+    pub fn checkConsistency(self: *@This()) bool { /* ... */ }
+    pub fn checkMemory(self: *@This()) bool { /* ... */ }
+    pub fn validate(self: *@This()) bool { /* ... */ }
+};
+
 const builder = coresim.TestBuilder(MySystem){};
 try builder
     .operations(&ops)
     .iterations(25)
     .sequence_length(10, 50)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 
 // Standard CI/CD testing
@@ -69,6 +87,8 @@ try coresim.TestBuilder(MySystem){}
     .iterations(100)
     .allocator_failures(0.001)
     .filesystem_errors(0.005)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
+    .invariant("valid", MySystem.validate, .important)
     .run(allocator);
 
 // High-stress robustness testing
@@ -78,6 +98,7 @@ try coresim.TestBuilder(MySystem){}
     .sequence_length(100, 500)
     .allocator_failures(0.02)
     .filesystem_errors(0.01)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 
 // Custom configuration with operation weights
@@ -91,6 +112,7 @@ try coresim.TestBuilder(MySystem){}
     .operation_weights(&weights)
     .random_keys(8, 32)
     .variable_size_values(64, 2048)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .iterations(1000)
     .run(allocator);
 ```
@@ -104,25 +126,7 @@ Your system needs:
 1. **Operation enum**: Define the operations your system supports
 2. **Lifecycle methods**: `init(allocator)` and `deinit(*Self)`
 3. **Operation methods**: Functions named to match your operation enum
-4. **Optional invariants**: `checkConsistency`, `checkMemory`, `validate` (auto-discovered)
-
-```zig
-const MySystem = struct {
-    pub const Operation = enum { create, read, update, delete };
-    
-    pub fn init(allocator: std.mem.Allocator) !@This() { /* ... */ }
-    pub fn deinit(self: *@This()) void { /* ... */ }
-    
-    // Method names must match operation enum values
-    pub fn create(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
-    pub fn read(self: *@This(), key: []const u8) ?[]const u8 { /* ... */ }
-    pub fn update(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
-    pub fn delete(self: *@This(), key: []const u8) bool { /* ... */ }
-    
-    // Optional: auto-discovered invariants
-    pub fn checkConsistency(self: *@This()) bool { /* ... */ }
-};
-```
+4. **Invariants**: Optional explicit invariant functions for validation
 
 ## Works with Any System
 
@@ -135,7 +139,7 @@ CoreSim tests any system type - networks, data structures, state machines, file 
 - **[API Reference](docs/api-reference.md)** - Complete API documentation with all 20+ testing functions
 - **[Quick Start Guide](docs/README.md)** - Get up and running in 5 minutes
 - **[Examples](examples/README.md)** - Working examples for 6 different system types
-- **[Integration Guide](docs/integration-guide.md)** - Step-by-step integration walkthrough  
+- **[Integration Guide](docs/integration-guide.md)** - Step-by-step integration walkthrough
 - **[Architecture Overview](docs/architecture.md)** - Deep dive into CoreSim's design
 
 ## Building and Running
@@ -150,8 +154,12 @@ zig build test
 # Run example demonstrations
 zig build example
 
-# Build your own project with CoreSim
-zig build --dep coresim=/path/to/coresim
+# Add CoreSim to your project:
+# 1. Add to build.zig.zon:
+#    .dependencies = .{ .coresim = .{ .path = "path/to/coresim" } }
+# 2. Add to build.zig:
+#    exe.root_module.addImport("coresim", b.dependency("coresim", .{}).module("coresim"));
+# 3. Use: const coresim = @import("coresim");
 ```
 
 
@@ -168,7 +176,7 @@ zig build --dep coresim=/path/to/coresim
 - **Validate invariants** automatically across thousands of scenarios
 - **Get reproducible failures** with deterministic seeds
 
-### For Application Developers  
+### For Application Developers
 - **Test complex state interactions** between multiple operations
 - **Simulate real-world conditions** with configurable failure rates
 - **Find memory leaks and resource issues** early in development

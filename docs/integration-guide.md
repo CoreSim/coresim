@@ -18,7 +18,7 @@ test_module.addImport("coresim", coresim_dep.module("coresim"));
 // build.zig.zon
 .dependencies = .{ .coresim = .{ .path = "../coresim" } },
 
-// build.zig  
+// build.zig
 const coresim_dep = b.dependency("coresim", .{});
 exe.root_module.addImport("coresim", coresim_dep.module("coresim"));
 ```
@@ -30,16 +30,16 @@ exe.root_module.addImport("coresim", coresim_dep.module("coresim"));
 const MyCache = struct {
     allocator: std.mem.Allocator,
     data: std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
-    
+
     pub const Operation = enum { put, get, delete };
-    
+
     pub fn init(allocator: std.mem.Allocator) !@This() {
         return @This(){
             .allocator = allocator,
             .data = std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
         };
     }
-    
+
     pub fn deinit(self: *@This()) void {
         var iterator = self.data.iterator();
         while (iterator.next()) |entry| {
@@ -48,7 +48,7 @@ const MyCache = struct {
         }
         self.data.deinit();
     }
-    
+
     pub fn put(self: *@This(), key: []const u8, value: []const u8) !void {
         if (self.data.fetchRemove(key)) |existing| {
             self.allocator.free(existing.key);
@@ -56,11 +56,11 @@ const MyCache = struct {
         }
         try self.data.put(try self.allocator.dupe(u8, key), try self.allocator.dupe(u8, value));
     }
-    
+
     pub fn get(self: *@This(), key: []const u8) ?[]const u8 {
         return self.data.get(key);
     }
-    
+
     pub fn delete(self: *@This(), key: []const u8) bool {
         if (self.data.fetchRemove(key)) |entry| {
             self.allocator.free(entry.key);
@@ -69,7 +69,7 @@ const MyCache = struct {
         }
         return false;
     }
-    
+
     // Optional: Auto-discovered invariants
     pub fn checkConsistency(self: *@This()) bool {
         var iterator = self.data.iterator();
@@ -92,11 +92,12 @@ test "My Cache Property Test" {
     try coresim.TestBuilder(MyCache){}
         .operations(&[_]MyCache.Operation{ .put, .get, .delete })
         .iterations(100)
+        .invariant("consistency", MyCache.checkConsistency, .critical)
         .run(std.testing.allocator);
 }
 ```
 
-**That's it!** CoreSim automatically generates operation sequences, injects failures, validates invariants, and provides detailed feedback.
+**That's it!** CoreSim automatically generates operation sequences, injects failures, validates your invariants, and provides detailed feedback.
 
 ## System Requirements
 
@@ -105,7 +106,49 @@ Your system needs exactly 4 things:
 1. **Operation Enum**: `pub const Operation = enum { create, read, update, delete };`
 2. **Lifecycle Methods**: `init(allocator)` and `deinit(self)`
 3. **Operation Methods**: Method names must match enum values
-4. **Optional Invariants**: `checkConsistency`, `checkMemory`, `validate` (auto-discovered)
+4. **Optional Invariants**: Functions you can reference with `.invariant()` method
+
+## Invariants
+
+CoreSim requires you to configure invariants for validation. This gives you complete control over what gets tested and at what severity level.
+
+### Adding Invariants
+
+```zig
+// Define invariant functions in your system
+pub fn checkConsistency(self: *@This()) bool {
+    return self.data.count() < 10000; // Example consistency check
+}
+
+pub fn checkMemory(self: *@This()) bool {
+    return self.allocated_bytes < 1000000; // Example memory check
+}
+
+// Add them explicitly to your test
+try coresim.TestBuilder(MySystem){}
+    .operations(&ops)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
+    .invariant("memory", MySystem.checkMemory, .important)
+    .run(allocator);
+```
+
+### Invariant Severity Levels
+
+- **`.critical`**: Test fails immediately if invariant is violated
+- **`.important`**: Test reports violation but continues
+- **`.advisory`**: Test logs violation for analysis
+
+### Multiple Invariants
+
+```zig
+// You can add multiple invariants with different severities
+try coresim.TestBuilder(MySystem){}
+    .operations(&ops)
+    .invariant("data_integrity", MySystem.checkDataIntegrity, .critical)
+    .invariant("performance", MySystem.checkPerformance, .advisory)
+    .invariant("memory_usage", MySystem.checkMemoryUsage, .important)
+    .run(allocator);
+```
 
 ## Testing Configurations
 
@@ -115,6 +158,7 @@ try coresim.TestBuilder(MySystem){}
     .operations(&ops)
     .iterations(25)
     .sequence_length(10, 50)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -125,6 +169,7 @@ try coresim.TestBuilder(MySystem){}
     .iterations(100)
     .allocator_failures(0.001)
     .filesystem_errors(0.005)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -135,6 +180,7 @@ try coresim.TestBuilder(MySystem){}
     .iterations(500)
     .sequence_length(100, 500)
     .allocator_failures(0.02)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -144,6 +190,7 @@ try coresim.TestBuilder(MySystem){}
     .operations(&ops)
     .iterations(5)
     .seed(12345)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -212,7 +259,7 @@ pub fn recover(self: *MySystem) !void {
 ```zig
 const weights = [_]coresim.OpWeight(MySystem.Operation){
     .{ .operation = .read, .weight = 0.7 },   // 70% reads
-    .{ .operation = .write, .weight = 0.2 },  // 20% writes  
+    .{ .operation = .write, .weight = 0.2 },  // 20% writes
     .{ .operation = .delete, .weight = 0.1 }, // 10% deletes
 };
 
@@ -255,7 +302,7 @@ fn run_comprehensive_tests(allocator: std.mem.Allocator) !void {
         .iterations(100)
         .named("basic_functionality")
         .run(allocator);
-    
+
     // Phase 2: Stress testing
     try coresim.TestBuilder(MySystem){}
         .operations(&all_ops)
@@ -273,16 +320,16 @@ const Database = struct {
     allocator: std.mem.Allocator,
     data: std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
     is_corrupted: bool = false,
-    
+
     pub const Operation = enum { insert, select, update, delete, backup };
-    
+
     pub fn init(allocator: std.mem.Allocator) !@This() {
         return @This(){
             .allocator = allocator,
             .data = std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
         };
     }
-    
+
     pub fn deinit(self: *@This()) void {
         var iterator = self.data.iterator();
         while (iterator.next()) |entry| {
@@ -291,7 +338,7 @@ const Database = struct {
         }
         self.data.deinit();
     }
-    
+
     pub fn insert(self: *@This(), key: []const u8, value: []const u8) !void {
         if (coresim.should_inject_custom_failure("disk_full")) {
             return error.DiskFull;
@@ -301,23 +348,23 @@ const Database = struct {
             return error.IndexCorrupted;
         }
         if (self.is_corrupted) return error.DatabaseCorrupted;
-        
+
         if (self.data.fetchRemove(key)) |existing| {
             self.allocator.free(existing.key);
             self.allocator.free(existing.value);
         }
         try self.data.put(try self.allocator.dupe(u8, key), try self.allocator.dupe(u8, value));
     }
-    
+
     pub fn select(self: *@This(), key: []const u8) ?[]const u8 {
         if (self.is_corrupted) return null;
         return self.data.get(key);
     }
-    
+
     pub fn update(self: *@This(), key: []const u8, value: []const u8) !void {
         try self.insert(key, value);
     }
-    
+
     pub fn delete(self: *@This(), key: []const u8) bool {
         if (self.is_corrupted) return false;
         if (self.data.fetchRemove(key)) |entry| {
@@ -327,13 +374,13 @@ const Database = struct {
         }
         return false;
     }
-    
+
     pub fn backup(self: *@This()) !void {
         if (coresim.should_inject_custom_failure("backup_failure")) {
             return error.BackupFailed;
         }
     }
-    
+
     pub fn checkConsistency(self: *@This()) bool {
         return self.data.count() < 10000;
     }
@@ -345,7 +392,7 @@ test "Database with Custom Failures" {
         .{ .name = "index_corruption", .probability = 0.005 },
         .{ .name = "backup_failure", .probability = 0.02 },
     };
-    
+
     try coresim.TestBuilder(Database){}
         .operations(&[_]Database.Operation{ .insert, .select, .update, .delete, .backup })
         .custom_failures(&db_failures)
@@ -377,7 +424,7 @@ pub fn put(self: *MySystem, key: []const u8, value: []const u8) !void {
 }
 ```
 
-### Flaky Invariants  
+### Flaky Invariants
 ```zig
 // ❌ Wrong: Non-deterministic
 pub fn checkConsistency(self: *MySystem) bool {

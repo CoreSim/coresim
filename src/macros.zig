@@ -273,5 +273,6 @@ test "macro basic usage" {
         .named("macro_test")
         .iterations(3) // Small number for test
         .sequence_length(5, 10)
+        .invariant("consistency", BaseKV.checkConsistency, .critical)
         .run(std.testing.allocator);
 }

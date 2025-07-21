@@ -4,7 +4,7 @@ Complete reference for the CoreSim testing framework with the unified TestBuilde
 
 ## TestBuilder API
 
-CoreSim provides a single, flexible TestBuilder API for configuring and running property-based tests. Users configure all testing parameters explicitly for their specific use case.
+CoreSim provides a single, flexible TestBuilder API for configuring and running property-based tests. Users configure all testing parameters for their specific use case.
 
 ### Basic Usage
 
@@ -12,6 +12,7 @@ CoreSim provides a single, flexible TestBuilder API for configuring and running 
 try coresim.TestBuilder(MySystem){}
     .operations(&[_]MySystem.Operation{ .put, .get, .delete })
     .iterations(100)
+    .invariant("consistency", MySystem.checkConsistency, .critical)
     .run(allocator);
 ```
 
@@ -21,16 +22,16 @@ try coresim.TestBuilder(MySystem){}
 const MySystem = struct {
     allocator: std.mem.Allocator,
     data: std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage),
-    
+
     pub const Operation = enum { put, get, delete };
-    
+
     pub fn init(allocator: std.mem.Allocator) !@This() {
         return @This(){
             .allocator = allocator,
             .data = std.HashMap([]const u8, []const u8, std.hash_map.StringContext, std.hash_map.default_max_load_percentage).init(allocator),
         };
     }
-    
+
     pub fn deinit(self: *@This()) void {
         var iterator = self.data.iterator();
         while (iterator.next()) |entry| {
@@ -39,7 +40,7 @@ const MySystem = struct {
         }
         self.data.deinit();
     }
-    
+
     pub fn put(self: *@This(), key: []const u8, value: []const u8) !void {
         if (coresim.should_inject_custom_failure("disk_full")) {
             return error.DiskFull;
@@ -50,14 +51,14 @@ const MySystem = struct {
         }
         try self.data.put(try self.allocator.dupe(u8, key), try self.allocator.dupe(u8, value));
     }
-    
+
     pub fn get(self: *@This(), key: []const u8) ?[]const u8 {
         if (coresim.should_inject_custom_failure("timeout")) {
             return null;
         }
         return self.data.get(key);
     }
-    
+
     pub fn delete(self: *@This(), key: []const u8) bool {
         if (self.data.fetchRemove(key)) |entry| {
             self.allocator.free(entry.key);
@@ -66,7 +67,7 @@ const MySystem = struct {
         }
         return false;
     }
-    
+
     // Auto-discovered invariant
     pub fn checkConsistency(self: *@This()) bool {
         return self.data.count() < 10000; // Reasonable size limit
@@ -93,7 +94,7 @@ fn checkDataIntegrity(system: *MySystem) bool {
     return true;
 }
 
-// The TestBuilder automatically discovers checkConsistency and allows custom invariants
+// The TestBuilder requires invariant configuration
 const stats = try coresim.TestBuilder(MySystem){}
     .operations(&[_]MySystem.Operation{ .put, .get, .delete })
     .named("comprehensive_test")
@@ -111,7 +112,7 @@ const stats = try coresim.TestBuilder(MySystem){}
     .run_with_stats(allocator);
 
 defer stats.deinit();
-// CoreSim validated both auto-discovered (checkConsistency) and custom (data_integrity) invariants
+// CoreSim validated both system invariants (checkConsistency) and custom (data_integrity) invariants
 std.debug.print("Test completed with invariant checks: {}\n", .{stats});
 ```
 
@@ -188,7 +189,7 @@ pub fn syncWithRemote(self: *DistributedSystem) !void {
         self.connected = false;
         return error.NetworkTimeout;
     }
-    
+
     // Proceed with network operation
     try self.performRemoteSync();
 }
@@ -197,7 +198,7 @@ pub fn sendRequest(self: *HttpClient, request: Request) !Response {
     if (coresim.should_inject_network_error()) {
         return error.ConnectionFailed;
     }
-    
+
     return self.httpClient.send(request);
 }
 ```
@@ -259,11 +260,11 @@ pub fn put(self: *DatabaseSystem, key: []const u8, value: []const u8) !void {
         self.disk_full = true;
         return error.DiskFull;
     }
-    
+
     if (coresim.should_inject_custom_failure("timeout")) {
         return error.Timeout;
     }
-    
+
     // Proceed with normal operation
     try self.data.put(key, value);
 }
@@ -273,7 +274,7 @@ pub fn put(self: *DatabaseSystem, key: []const u8, value: []const u8) !void {
 
 #### Database Systems
 - `"disk_full"` - Storage exhaustion
-- `"index_corruption"` - Data integrity failures  
+- `"index_corruption"` - Data integrity failures
 - `"timeout"` - Operation timeouts
 - `"deadlock"` - Transaction conflicts
 
@@ -346,13 +347,13 @@ pub fn put(self: *DatabaseSystem, key: []const u8, value: []const u8) !void {
     if (self.is_corrupted) {
         return error.DatabaseCorrupted;
     }
-    
+
     // Check for new failure injection
     if (coresim.should_inject_custom_failure("index_corruption")) {
         self.is_corrupted = true; // Set persistent state
         return error.IndexCorrupted;
     }
-    
+
     // Proceed with operation
 }
 ```
@@ -399,24 +400,24 @@ pub fn checkpoint(self: *DatabaseSystem, key: []const u8, value: []const u8) !vo
     // Set high-stress condition during checkpointing
     coresim.set_system_condition(.during_recovery);
     defer coresim.set_system_condition(null); // Reset when done
-    
+
     // Custom failures will now have 10x higher probability
     if (coresim.should_inject_custom_failure("checkpoint_failed")) {
         return error.CheckpointFailed;
     }
-    
+
     // Perform actual checkpoint...
 }
 
 pub fn flush(self: *DatabaseSystem, key: []const u8, value: []const u8) !void {
     coresim.set_system_condition(.during_flush);
     defer coresim.set_system_condition(null);
-    
+
     // Disk failures now 5x more likely during flush
     if (coresim.should_inject_custom_failure("disk_full")) {
-        return error.DiskFull; 
+        return error.DiskFull;
     }
-    
+
     // Perform actual flush...
 }
 ```
@@ -470,7 +471,7 @@ Conditional multipliers affect ALL failure types configured for the test:
 try coresim.TestBuilder(DistributedSystem){}
     .operations(&ops)
     .network_errors(0.01)           // Base 1% network errors
-    .allocator_failures(0.005)      // Base 0.5% allocation failures  
+    .allocator_failures(0.005)      // Base 0.5% allocation failures
     .custom_failures(&custom_failures) // Domain-specific failures
     .conditional_multiplier(.during_recovery, 10.0) // ALL become 10x more likely during recovery
     .run(allocator);
@@ -478,7 +479,7 @@ try coresim.TestBuilder(DistributedSystem){}
 
 When the system sets condition to `.during_recovery`:
 - Network errors: 1% → 10% (10x increase)
-- Allocation failures: 0.5% → 5% (10x increase)  
+- Allocation failures: 0.5% → 5% (10x increase)
 - Custom failures: Each multiplied by 10x
 
 ## Detailed Statistics Collection
@@ -501,7 +502,7 @@ std.debug.print("{}\n", .{stats});
 ### Features Provided
 
 - **Per-Operation Timing**: Min/max/average execution times for each operation type
-- **Operation Distribution Analysis**: Compare actual vs intended operation frequency  
+- **Operation Distribution Analysis**: Compare actual vs intended operation frequency
 - **Failure Rate Tracking**: Monitor failure injection patterns over time
 - **Memory Usage Monitoring**: Track memory allocation patterns
 - **Performance Impact Analysis**: Measure impact of failures on execution time
@@ -519,7 +520,7 @@ Operation Distribution:
   get: 70.2% actual vs 70.0% intended (diff: +0.2%)
   put: 19.8% actual vs 20.0% intended (diff: -0.2%)
   delete: 10.0% actual vs 10.0% intended (diff: 0.0%)
-  
+
 Failure Rate Trend: 2.31% average over 150 samples
 Memory Allocations: 45,231 total
 ```
@@ -558,10 +559,10 @@ const comprehensive_stats = try coresim.TestBuilder(DatabaseSystem){}
 - Configurable length bounds
 - Best for general testing
 
-### Collision-Prone Keys  
+### Collision-Prone Keys
 ```zig
 .collision_prone_keys(collision_rate)
-// or  
+// or
 .key_strategy(.{ .collision_prone = .{ .hash_collision_rate = 0.3 } })
 ```
 - Generates keys designed to cause hash collisions
@@ -619,7 +620,7 @@ Control the probability distribution of operations to simulate realistic workloa
 const OpWeight = coresim.OpWeight(MySystem.Operation);
 const weights = [_]OpWeight{
     .{ .operation = .get, .weight = 0.8 },    // 80% reads
-    .{ .operation = .put, .weight = 0.15 },   // 15% writes  
+    .{ .operation = .put, .weight = 0.15 },   // 15% writes
     .{ .operation = .delete, .weight = 0.05 } // 5% deletes
 };
 
@@ -674,17 +675,17 @@ Your system must implement:
 const MySystem = struct {
     // 1. Operation enum (required)
     pub const Operation = enum { op1, op2, op3 };
-    
+
     // 2. Lifecycle methods (required)
     pub fn init(allocator: std.mem.Allocator) !@This() { /* ... */ }
     pub fn deinit(self: *@This()) void { /* ... */ }
-    
+
     // 3. Operation methods (required - names must match enum)
     pub fn op1(self: *@This()) !void { /* ... */ }
     pub fn op2(self: *@This(), key: []const u8) ?[]const u8 { /* ... */ }
     pub fn op3(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */ }
-    
-    // 4. Invariants (optional - auto-discovered)
+
+    // 4. Invariants (optional - must be configured)
     pub fn checkConsistency(self: *@This()) bool { /* ... */ }
     pub fn checkMemory(self: *@This()) bool { /* ... */ }
     pub fn validate(self: *@This()) bool { /* ... */ }
@@ -711,7 +712,7 @@ pub fn put(self: *@This(), key: []const u8, value: []const u8) !void { /* ... */
 CoreSim automatically finds and uses these invariant methods:
 
 - `checkConsistency()` - Critical severity
-- `checkMemory()` - Critical severity  
+- `checkMemory()` - Critical severity
 - `validate()` - Important severity
 
 ## Complete Examples

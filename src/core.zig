@@ -302,7 +302,8 @@ pub fn TestBuilder(comptime SystemType: type) type {
 
             const op_dist = self.setup_operation_distribution();
 
-            var invariants_list = try self.auto_discover_invariants(allocator);
+            // Create invariants list with only explicit custom invariants
+            var invariants_list = std.ArrayList(property_testing.InvariantChecker(SystemType)).init(allocator);
             defer invariants_list.deinit();
 
             // Add custom invariants from config
@@ -415,39 +416,6 @@ pub fn TestBuilder(comptime SystemType: type) type {
             return op_dist;
         }
 
-        /// Auto-discover invariants based on system type declarations
-        fn auto_discover_invariants(self: Self, allocator: std.mem.Allocator) !std.ArrayList(property_testing.InvariantChecker(SystemType)) {
-            _ = self;
-            var invariants_list = std.ArrayList(property_testing.InvariantChecker(SystemType)).init(allocator);
-
-            // Add common invariants if they exist
-            if (@hasDecl(SystemType, "checkConsistency")) {
-                try invariants_list.append(.{
-                    .name = "consistency",
-                    .check_fn = SystemType.checkConsistency,
-                    .severity = .critical,
-                });
-            }
-
-            if (@hasDecl(SystemType, "checkMemory")) {
-                try invariants_list.append(.{
-                    .name = "memory",
-                    .check_fn = SystemType.checkMemory,
-                    .severity = .critical,
-                });
-            }
-
-            if (@hasDecl(SystemType, "validate")) {
-                try invariants_list.append(.{
-                    .name = "validation",
-                    .check_fn = SystemType.validate,
-                    .severity = .important,
-                });
-            }
-
-            return invariants_list;
-        }
-
         /// Set up detailed statistics with intended operation weights
         fn setup_detailed_statistics(self: Self, stats: *property_testing.TestStatistics) !void {
             if (!self.config.detailed_stats_enabled) return;
@@ -533,7 +501,7 @@ test "Simple API basic usage" {
             return false;
         }
 
-        // Optional: Invariant checking methods (auto-discovered)
+        // Invariant checking method for explicit use
         pub fn checkConsistency(self: *@This()) bool {
             var iterator = self.data.iterator();
             while (iterator.next()) |entry| {
@@ -543,12 +511,13 @@ test "Simple API basic usage" {
         }
     };
 
-    // Test the simple API
+    // Test the simple API with explicit invariant
     const builder = TestBuilder(SimpleKV){};
     try builder
         .operations(&[_]SimpleKV.Operation{ .put, .get, .delete })
         .named("simple_test")
         .iterations(5)
+        .invariant("consistency", SimpleKV.checkConsistency, .critical)
         .run(std.testing.allocator);
 }
 
@@ -620,7 +589,7 @@ test "Custom invariants functionality" {
             self.counter = 0;
         }
 
-        // Built-in invariant
+        // Invariant checking method
         pub fn checkConsistency(self: *@This()) bool {
             return self.counter < 1000; // Basic sanity check
         }
@@ -634,13 +603,14 @@ test "Custom invariants functionality" {
 
     const ops = [_]TestSystem.Operation{ .increment, .decrement, .reset };
 
-    // Test with custom invariant
+    // Test with multiple explicit invariants
     const builder = TestBuilder(TestSystem){};
     try builder
         .operations(&ops)
-        .named("custom_invariant_test")
+        .named("explicit_invariants_test")
         .iterations(5)
         .sequence_length(10, 20)
+        .invariant("consistency", TestSystem.checkConsistency, .critical)
         .invariant("counter_range", TestSystem.checkCounterRange, .important)
         .run(std.testing.allocator);
 }

@@ -112,6 +112,7 @@ pub fn main() !void {
         .iterations(100)
         .seed(42)
         .named("baseline_test")
+        .invariant("consistency", Database.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Baseline test completed!\n\n", .{});
@@ -134,6 +135,7 @@ pub fn main() !void {
         .iterations(100)
         .seed(42)
         .named("conditional_multipliers_test")
+        .invariant("consistency", Database.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Conditional multipliers test completed!\n\n", .{});
@@ -163,6 +165,7 @@ pub fn main() !void {
         .iterations(100)
         .seed(42)
         .named("checkpoint_test")
+        .invariant("consistency", Database.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Checkpoint test completed!\n\n", .{});
@@ -185,6 +188,7 @@ pub fn main() !void {
         .iterations(150)
         .seed(42)
         .named("convenience_api_test")
+        .invariant("consistency", Database.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Convenience API test completed!\n\n", .{});

@@ -67,7 +67,7 @@ The primary interface that most users interact with. Provides:
 
 **One-liner Functions:**
 - `quickTestOps()` - Fast testing with no failures
-- `basicTestOps()` - Standard testing with low failure rates  
+- `basicTestOps()` - Standard testing with low failure rates
 - `stressTestOps()` - High failure injection for robustness testing
 - `debugTestOps()` - Minimal, deterministic testing for debugging
 
@@ -239,7 +239,7 @@ InvariantChecker(SystemType) = struct {
 FilesystemInterface = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
-    
+
     // VTable contains function pointers for all filesystem operations
 }
 ```
@@ -303,7 +303,7 @@ FilesystemInterface = struct {
 fn generate_operation_sequence(self: *PropertyTest) ![]Operation {
     const sequence = try self.allocator.alloc(Operation, length);
     // Framework owns this allocation
-    
+
     for (sequence) |*op| {
         op.key = try generateKey(); // Framework allocates
         op.value = try generateValue(); // Framework allocates
@@ -384,9 +384,9 @@ pub const SystemCondition = enum {
 
 ## Configuration Philosophy
 
-CoreSim follows a "configuration over convention" approach where users explicitly configure all aspects of testing rather than relying on hidden defaults.
+CoreSim follows a "configuration over convention" approach where users configure all aspects of testing rather than relying on hidden defaults.
 
-### Explicit Configuration Benefits
+### Configuration Benefits
 
 1. **Reproducibility**: All behavior is determined by explicit configuration
 2. **Debuggability**: No hidden magic or implicit behavior
@@ -401,11 +401,11 @@ pub fn validate(config: PropertyTest) !void {
     if (config.generators.sequence_length.min > config.generators.sequence_length.max) {
         return error.InvalidSequenceLength;
     }
-    
+
     if (config.failure_config.allocator_failure_probability > 1.0) {
         return error.InvalidProbability;
     }
-    
+
     // Additional validation...
 }
 ```

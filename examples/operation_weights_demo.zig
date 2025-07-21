@@ -88,6 +88,7 @@ pub fn main() !void {
         .operations(&[_]TestStore.Operation{ .put, .get, .delete })
         .iterations(50)
         .named("equal_weights_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
 
     const counts1 = test_system1.getOperationCounts();
@@ -108,6 +109,7 @@ pub fn main() !void {
         .operation_weights(&read_heavy_weights)
         .iterations(100)
         .named("read_heavy_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Read-heavy workload test passed!\n\n", .{});
@@ -126,6 +128,7 @@ pub fn main() !void {
         .operation_weights(&write_heavy_weights)
         .iterations(100)
         .named("write_heavy_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Write-heavy workload test passed!\n\n", .{});
@@ -144,6 +147,7 @@ pub fn main() !void {
         .operation_weights(&cleanup_weights)
         .iterations(75)
         .named("cleanup_focused_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Cleanup-focused workload test passed!\n\n", .{});
@@ -166,6 +170,7 @@ pub fn main() !void {
         .sequence_length(100, 300) // Custom sequence lengths
         .iterations(80)
         .named("combined_features_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Combined features test passed!\n\n", .{});

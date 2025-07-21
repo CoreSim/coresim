@@ -183,6 +183,7 @@ pub fn main() !void {
         .network_errors(0.02) // 2% network failure rate
         .iterations(100)
         .named("basic_network_test")
+        .invariant("consistency", DistributedSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Basic network failure test passed!\n\n", .{});
@@ -195,6 +196,7 @@ pub fn main() !void {
         .network_errors(0.05) // 5% network failure rate for distributed ops
         .iterations(80)
         .named("distributed_ops_test")
+        .invariant("consistency", DistributedSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Distributed operations network test passed!\n\n", .{});
@@ -215,6 +217,7 @@ pub fn main() !void {
         .custom_failures(&custom_failures)
         .iterations(150)
         .named("combined_failures_test")
+        .invariant("consistency", DistributedSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Combined network and custom failures test passed!\n\n", .{});
@@ -245,6 +248,7 @@ pub fn main() !void {
         .variable_size_values(32, 256)
         .iterations(200)
         .named("realistic_workload_test")
+        .invariant("consistency", DistributedSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Realistic distributed workload test passed!\n\n", .{});
@@ -264,6 +268,7 @@ pub fn main() !void {
         .custom_failures(&stress_failures)
         .iterations(60)
         .named("network_stress_test")
+        .invariant("consistency", DistributedSystem.checkConsistency, .critical)
         .run(allocator);
 
     std.debug.print("   ✓ Network failure stress test passed!\n\n", .{});

@@ -77,6 +77,7 @@ pub fn main() !void {
         .variable_size_values(16, 512) // Values: 16-512 bytes
         .iterations(50)
         .named("random_keys_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
     std.debug.print("   ✓ Random keys test passed!\n\n", .{});
 
@@ -89,6 +90,7 @@ pub fn main() !void {
         .random_binary_values() // Random binary data
         .iterations(75)
         .named("collision_stress_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
     std.debug.print("   ✓ Collision stress test passed!\n\n", .{});
 
@@ -103,6 +105,7 @@ pub fn main() !void {
         .seed(12345) // Deterministic
         .iterations(30)
         .named("sequential_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
     std.debug.print("   ✓ Sequential keys test passed!\n\n", .{});
 
@@ -117,6 +120,7 @@ pub fn main() !void {
         .allocator_failures(0.01) // 1% allocation failures
         .iterations(40)
         .named("full_custom_test")
+        .invariant("consistency", TestStore.checkConsistency, .critical)
         .run(allocator);
     std.debug.print("   ✓ Full custom configuration test passed!\n\n", .{});
 

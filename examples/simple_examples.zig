@@ -47,6 +47,7 @@ pub fn testHttpServer(allocator: std.mem.Allocator) !void {
         .operations(&[_]HttpServer.Operation{ .start, .handle_request, .get_status, .stop })
         .iterations(25)
         .sequence_length(10, 50)
+        .invariant("consistency", HttpServer.checkConsistency, .critical)
         .run(allocator);
 }
 
@@ -112,6 +113,7 @@ pub fn testMessageQueue(allocator: std.mem.Allocator) !void {
         .iterations(100)
         .allocator_failures(0.001)
         .filesystem_errors(0.005)
+        .invariant("memory", MessageQueue.checkMemory, .critical)
         .run(allocator);
 }
 
@@ -167,6 +169,7 @@ pub fn testTrafficLight(allocator: std.mem.Allocator) !void {
         .iterations(5)
         .sequence_length(5, 15)
         .seed(12345)
+        .invariant("validation", TrafficLight.validate, .important)
         .run(allocator);
 }
 
@@ -251,6 +254,7 @@ pub fn testSimpleCache(allocator: std.mem.Allocator) !void {
         .sequence_length(100, 500)
         .allocator_failures(0.02)
         .filesystem_errors(0.01)
+        .invariant("consistency", SimpleCache.checkConsistency, .critical)
         .run(allocator);
 }
 
@@ -318,6 +322,7 @@ pub fn testFileManager(allocator: std.mem.Allocator) !void {
         .iterations(100)
         .allocator_failures(0.001)
         .filesystem_errors(0.005)
+        .invariant("memory", FileManager.checkMemory, .critical)
         .run(allocator);
 }
 
@@ -363,6 +368,7 @@ pub fn testCounter(allocator: std.mem.Allocator) !void {
         .operations(&[_]Counter.Operation{ .increment, .decrement, .get, .reset })
         .iterations(25)
         .sequence_length(10, 50)
+        .invariant("validation", Counter.validate, .important)
         .run(allocator);
 }
 
