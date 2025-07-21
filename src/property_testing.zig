@@ -616,13 +616,14 @@ pub fn PropertyTest(comptime OperationType: type, comptime SystemType: type) typ
 
             for (0..iterations) |i| {
                 const sequence = try self.generate_operation_sequence();
-                defer self.free_operation_sequence(sequence);
 
                 const result = self.execute_sequence(sequence) catch |err| switch (err) {
                     PropertyTestingError.InvariantViolation => {
                         std.debug.print("Invariant violation detected in iteration {}, attempting to shrink...\n", .{i});
                         const shrunk = try self.shrink_sequence(sequence);
                         defer self.free_operation_sequence(shrunk);
+                        // Original sequence is consumed by shrinking, don't free it separately
+                        self.free_operation_sequence(sequence);
 
                         std.debug.print("Shrunk from {} to {} operations\n", .{ sequence.len, shrunk.len });
                         self.print_minimal_reproduction(shrunk);
@@ -630,6 +631,9 @@ pub fn PropertyTest(comptime OperationType: type, comptime SystemType: type) typ
                     },
                     else => return err,
                 };
+
+                // Free sequence on normal completion
+                defer self.free_operation_sequence(sequence);
 
                 if (!result) {
                     return PropertyTestingError.TestFailed;
@@ -642,7 +646,11 @@ pub fn PropertyTest(comptime OperationType: type, comptime SystemType: type) typ
                 }
             }
 
-            std.debug.print("Property test completed successfully!\n", .{});
+            if (self.stats.invariant_violations > 0) {
+                std.debug.print("Property test completed with {} non-critical invariant violations!\n", .{self.stats.invariant_violations});
+            } else {
+                std.debug.print("Property test completed successfully!\n", .{});
+            }
             std.debug.print("{}\n", .{self.stats});
         }
 
@@ -719,9 +727,10 @@ pub fn PropertyTest(comptime OperationType: type, comptime SystemType: type) typ
                 // Check invariants
                 for (self.invariants) |invariant| {
                     if (!invariant.check(&system)) {
-                        std.debug.print("Invariant violation: {s}\n", .{invariant.name});
+                        std.debug.print("Invariant violation: {s} (severity: {s})\n", .{ invariant.name, @tagName(invariant.severity) });
                         self.stats.invariant_violations += 1;
                         if (invariant.severity == .critical) {
+                            std.debug.print("CRITICAL invariant failed - aborting test\n", .{});
                             return PropertyTestingError.InvariantViolation;
                         }
                     }
@@ -747,9 +756,18 @@ pub fn PropertyTest(comptime OperationType: type, comptime SystemType: type) typ
                     const remove_index = self.prng.random().uintLessThan(usize, current_sequence.len);
                     var new_sequence = try self.allocator.alloc(OperationT, current_sequence.len - 1);
 
-                    @memcpy(new_sequence[0..remove_index], current_sequence[0..remove_index]);
-                    if (remove_index < current_sequence.len - 1) {
-                        @memcpy(new_sequence[remove_index..], current_sequence[remove_index + 1 ..]);
+                    // Deep clone operations, don't just copy pointers
+                    var new_idx: usize = 0;
+                    for (current_sequence, 0..) |op, i| {
+                        if (i != remove_index) {
+                            new_sequence[new_idx] = OperationT{
+                                .operation_type = op.operation_type,
+                                .key = if (op.key) |key| try self.allocator.dupe(u8, key) else null,
+                                .value = if (op.value) |value| try self.allocator.dupe(u8, value) else null,
+                                .context = op.context,
+                            };
+                            new_idx += 1;
+                        }
                     }
 
                     const still_fails = self.execute_sequence(new_sequence) catch true;

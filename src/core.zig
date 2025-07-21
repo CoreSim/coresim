@@ -740,39 +740,44 @@ test "TestBuilder failure injection configuration" {
 
 test "TestBuilder sequence length configuration" {
     const TestSystem = struct {
-        operations_count: u32 = 0,
+        data: std.ArrayList(u8),
 
-        pub const Operation = enum { op1, op2 };
+        pub const Operation = enum { add_item, remove_item };
 
         pub fn init(allocator: std.mem.Allocator) !@This() {
-            _ = allocator;
-            return @This(){};
+            return @This(){
+                .data = std.ArrayList(u8).init(allocator),
+            };
         }
 
-        pub fn deinit(_: *@This()) void {}
-
-        pub fn op1(self: *@This(), _: []const u8, _: []const u8) !void {
-            self.operations_count += 1;
+        pub fn deinit(self: *@This()) void {
+            self.data.deinit();
         }
 
-        pub fn op2(self: *@This(), _: []const u8, _: []const u8) !void {
-            self.operations_count += 1;
+        pub fn add_item(self: *@This(), _: []const u8, _: []const u8) !void {
+            try self.data.append(1);
         }
 
-        pub fn checkOperationsInRange(self: *@This()) bool {
-            // Should be within configured range
-            return self.operations_count >= 5 and self.operations_count <= 15;
+        pub fn remove_item(self: *@This(), _: []const u8, _: []const u8) !void {
+            if (self.data.items.len > 0) {
+                _ = self.data.pop();
+            }
+        }
+
+        pub fn checkReasonableSize(self: *@This()) bool {
+            // Check that data structure doesn't grow unbounded
+            return self.data.items.len < 1000;
         }
     };
 
-    const ops = [_]TestSystem.Operation{ .op1, .op2 };
+    const ops = [_]TestSystem.Operation{ .add_item, .remove_item };
 
     const builder = TestBuilder(TestSystem){};
     try builder
         .operations(&ops)
-        .sequence_length(5, 15) // Between 5 and 15 operations per test
+        .sequence_length(5, 15) // Between 5 and 15 operations per sequence
         .iterations(3)
-        .invariant("ops_in_range", TestSystem.checkOperationsInRange, .important)
+        .invariant("reasonable_size", TestSystem.checkReasonableSize, .critical)
         .run(std.testing.allocator);
 }
 
@@ -870,4 +875,44 @@ test "CustomFailure type functionality" {
     try std.testing.expect(failure1.probability == 0.1);
     try std.testing.expect(std.mem.eql(u8, failure2.name, "network_timeout"));
     try std.testing.expect(failure2.probability == 0.05);
+}
+
+test "Invariant severity handling demonstration" {
+    const TestSystem = struct {
+        counter: u32 = 0,
+
+        pub const Operation = enum { increment };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+
+        pub fn increment(self: *@This(), _: []const u8, _: []const u8) !void {
+            self.counter += 1;
+        }
+
+        // This will violate after a few operations (non-critical)
+        pub fn checkSmall(self: *@This()) bool {
+            return self.counter <= 2;
+        }
+
+        // This should never violate (critical)
+        pub fn checkReasonable(self: *@This()) bool {
+            return self.counter < 1000;
+        }
+    };
+
+    const ops = [_]TestSystem.Operation{.increment};
+
+    const builder = TestBuilder(TestSystem){};
+    try builder
+        .operations(&ops)
+        .iterations(2)
+        .sequence_length(5, 8)
+        .invariant("small_counter", TestSystem.checkSmall, .important) // Will violate but not fail test
+        .invariant("reasonable_counter", TestSystem.checkReasonable, .critical) // Should not violate
+        .run(std.testing.allocator);
 }
