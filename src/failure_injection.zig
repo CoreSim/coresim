@@ -69,6 +69,7 @@ pub const FailureInjectionConfig = struct {
 
     pub fn deinit(self: *FailureInjectionConfig) void {
         self.custom_failure_probabilities.deinit();
+        // Note: conditional_multipliers slice is owned by caller and should be freed by them
     }
 };
 
@@ -203,8 +204,9 @@ pub const FailureConfigBuilder = struct {
     multipliers: std.ArrayList(ConditionalMultiplier),
 
     pub fn init(allocator: std.mem.Allocator) FailureConfigBuilder {
+        const config = FailureInjectionConfig.init(allocator);
         return FailureConfigBuilder{
-            .config = FailureInjectionConfig{},
+            .config = config,
             .allocator = allocator,
             .multipliers = std.ArrayList(ConditionalMultiplier).init(allocator),
         };
@@ -245,7 +247,10 @@ pub const FailureConfigBuilder = struct {
 
     pub fn build(self: *FailureConfigBuilder) !FailureInjectionConfig {
         self.config.conditional_multipliers = try self.multipliers.toOwnedSlice();
-        return self.config;
+        // Transfer ownership - caller is responsible for cleanup
+        const result = self.config;
+        self.config = FailureInjectionConfig.init(self.allocator);
+        return result;
     }
 };
 
@@ -330,4 +335,197 @@ test "Failure tracker" {
 
     try std.testing.expect(tracker.get_allocator_failure_rate() == 0.2); // 2/10
     try std.testing.expect(tracker.get_filesystem_error_rate() == 0.1); // 1/10
+}
+
+test "FailureInjectionConfig custom failures" {
+    var config = FailureInjectionConfig.init(std.testing.allocator);
+    defer config.deinit();
+
+    // Test setting and getting custom probabilities
+    try config.set_custom_probability(std.testing.allocator, "disk_full", 0.1);
+    try config.set_custom_probability(std.testing.allocator, "network_timeout", 0.05);
+
+    try std.testing.expect(config.get_custom_probability("disk_full", null) == 0.1);
+    try std.testing.expect(config.get_custom_probability("network_timeout", null) == 0.05);
+    try std.testing.expect(config.get_custom_probability("unknown_failure", null) == 0.0);
+}
+
+test "ConditionalMultiplier effective probability calculation" {
+    const multipliers = [_]ConditionalMultiplier{
+        .{ .condition = .during_recovery, .multiplier = 5.0 },
+        .{ .condition = .under_memory_pressure, .multiplier = 2.0 },
+    };
+
+    var config = FailureInjectionConfig.init(std.testing.allocator);
+    defer config.deinit();
+    config.allocator_failure_probability = 0.1;
+    config.conditional_multipliers = &multipliers;
+
+    // Test normal conditions
+    try std.testing.expect(config.get_effective_probability(0.1, null) == 0.1);
+
+    // Test during recovery (5x multiplier)
+    try std.testing.expect(config.get_effective_probability(0.1, .during_recovery) == 0.5);
+
+    // Test under memory pressure (2x multiplier)
+    try std.testing.expect(config.get_effective_probability(0.1, .under_memory_pressure) == 0.2);
+
+    // Test maximum cap at 1.0
+    try std.testing.expect(config.get_effective_probability(0.3, .during_recovery) == 1.0);
+}
+
+test "FailureTracker custom failures recording" {
+    var tracker = FailureTracker.init(std.testing.allocator);
+    defer tracker.deinit();
+
+    for (0..20) |_| {
+        tracker.record_operation();
+    }
+
+    try tracker.record_custom_failure("disk_full");
+    try tracker.record_custom_failure("disk_full");
+    try tracker.record_custom_failure("network_timeout");
+
+    try std.testing.expect(tracker.get_custom_failure_rate("disk_full") == 0.1); // 2/20
+    try std.testing.expect(tracker.get_custom_failure_rate("network_timeout") == 0.05); // 1/20
+    try std.testing.expect(tracker.get_custom_failure_rate("unknown") == 0.0);
+}
+
+test "FailureConfigBuilder functionality" {
+    var builder = FailureConfigBuilder.init(std.testing.allocator);
+    defer builder.deinit();
+
+    _ = builder.allocator_failures(0.1);
+    _ = builder.filesystem_errors(0.05);
+    _ = builder.network_errors(0.02);
+    _ = try builder.custom_failure("disk_full", 0.01);
+    _ = try builder.conditional_multiplier(.during_recovery, 10.0);
+
+    var config = try builder.build();
+    defer config.deinit();
+    defer std.testing.allocator.free(config.conditional_multipliers);
+
+    try std.testing.expect(config.allocator_failure_probability == 0.1);
+    try std.testing.expect(config.filesystem_error_probability == 0.05);
+    try std.testing.expect(config.network_error_probability == 0.02);
+    try std.testing.expect(config.get_custom_probability("disk_full", null) == 0.01);
+    try std.testing.expect(config.conditional_multipliers.len == 1);
+    try std.testing.expect(config.conditional_multipliers[0].condition == .during_recovery);
+    try std.testing.expect(config.conditional_multipliers[0].multiplier == 10.0);
+}
+
+test "FailureInjector network error injection" {
+    var config = FailureInjectionConfig.init(std.testing.allocator);
+    defer config.deinit();
+
+    // Test with 0% probability
+    config.network_error_probability = 0.0;
+    var prng1 = std.Random.DefaultPrng.init(42);
+    var injector1 = FailureInjector.init(config, &prng1);
+    try std.testing.expect(!injector1.should_inject_network_error());
+
+    // Test with 100% probability
+    config.network_error_probability = 1.0;
+    var prng2 = std.Random.DefaultPrng.init(1);
+    var injector2 = FailureInjector.init(config, &prng2);
+
+    // At 1.0 probability, at least some calls should inject errors
+    var injection_count: u32 = 0;
+    for (0..10) |_| {
+        if (injector2.should_inject_network_error()) {
+            injection_count += 1;
+        }
+    }
+    try std.testing.expect(injection_count > 0);
+}
+
+test "FailureInjector custom failure injection" {
+    var prng = std.Random.DefaultPrng.init(12345);
+
+    var config = FailureInjectionConfig.init(std.testing.allocator);
+    defer config.deinit();
+    try config.set_custom_probability(std.testing.allocator, "test_failure", 1.0); // 100% chance
+
+    var injector = FailureInjector.init(config, &prng);
+
+    // Should always inject at 100% probability
+    try std.testing.expect(injector.should_inject_custom_failure("test_failure"));
+    try std.testing.expect(injector.should_inject_custom_failure("test_failure"));
+
+    // Non-configured failure should not inject
+    try std.testing.expect(!injector.should_inject_custom_failure("unknown_failure"));
+}
+
+test "ConditionalMultiplier duration tracking" {
+    const multiplier = ConditionalMultiplier{
+        .condition = .during_recovery,
+        .multiplier = 5.0,
+        .duration = 1000, // 1000 ns duration
+    };
+
+    // Within duration
+    try std.testing.expect(multiplier.isActive(500));
+    try std.testing.expect(multiplier.isActive(999));
+
+    // Beyond duration
+    try std.testing.expect(!multiplier.isActive(1000));
+    try std.testing.expect(!multiplier.isActive(1500));
+}
+
+test "SystemCondition enum completeness" {
+    // Test that all system conditions are accessible
+    const conditions = [_]SystemCondition{
+        .during_recovery,
+        .under_memory_pressure,
+        .high_operation_rate,
+        .after_restart,
+        .during_flush,
+        .hash_table_resize,
+        .normal_operation,
+    };
+
+    for (conditions) |condition| {
+        const multiplier = ConditionalMultiplier{
+            .condition = condition,
+            .multiplier = 2.0,
+        };
+        try std.testing.expect(multiplier.condition == condition);
+    }
+}
+
+test "FailureTracker zero operations edge case" {
+    var tracker = FailureTracker.init(std.testing.allocator);
+    defer tracker.deinit();
+
+    // No operations recorded
+    try std.testing.expect(tracker.get_allocator_failure_rate() == 0.0);
+    try std.testing.expect(tracker.get_filesystem_error_rate() == 0.0);
+    try std.testing.expect(tracker.get_network_error_rate() == 0.0);
+    try std.testing.expect(tracker.get_custom_failure_rate("any_failure") == 0.0);
+}
+
+test "FailureInjector condition changes during runtime" {
+    var prng = std.Random.DefaultPrng.init(42);
+
+    const multipliers = [_]ConditionalMultiplier{
+        .{ .condition = .during_recovery, .multiplier = 10.0 },
+    };
+
+    var config = FailureInjectionConfig.init(std.testing.allocator);
+    defer config.deinit();
+    config.allocator_failure_probability = 0.01;
+    config.conditional_multipliers = &multipliers;
+
+    var injector = FailureInjector.init(config, &prng);
+
+    // Start with no condition
+    try std.testing.expect(injector.current_condition == null);
+
+    // Change to recovery condition
+    injector.set_condition(.during_recovery);
+    try std.testing.expect(injector.current_condition == .during_recovery);
+
+    // Clear condition
+    injector.set_condition(null);
+    try std.testing.expect(injector.current_condition == null);
 }

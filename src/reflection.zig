@@ -153,3 +153,203 @@ pub fn call_method_with_operation(comptime SystemType: type, system: *SystemType
         },
     }
 }
+
+// ============================================================================
+// Unit Tests for Reflection Utilities
+// ============================================================================
+
+test "discover_init_method with error union return" {
+    const TestSystem = struct {
+        value: u32,
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){ .value = 42 };
+        }
+    };
+
+    const init_fn = discover_init_method(TestSystem);
+    const system = try init_fn(std.testing.allocator);
+    try std.testing.expect(system.value == 42);
+}
+
+test "discover_init_method with create method" {
+    const TestSystem = struct {
+        value: u32,
+
+        pub fn create(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){ .value = 123 };
+        }
+    };
+
+    const init_fn = discover_init_method(TestSystem);
+    const system = try init_fn(std.testing.allocator);
+    try std.testing.expect(system.value == 123);
+}
+
+test "discover_deinit_method with deinit" {
+    const TestSystem = struct {
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    const deinit_fn = discover_deinit_method(TestSystem);
+    var system = TestSystem{};
+    deinit_fn(&system); // Should not crash
+}
+
+test "discover_deinit_method with destroy" {
+    const TestSystem = struct {
+        pub fn destroy(_: *@This()) void {}
+    };
+
+    const deinit_fn = discover_deinit_method(TestSystem);
+    var system = TestSystem{};
+    deinit_fn(&system); // Should not crash
+}
+
+test "discover_operation_type with Operation enum" {
+    const TestSystem = struct {
+        pub const Operation = enum { put, get, delete };
+    };
+
+    const OpType = discover_operation_type(TestSystem);
+    try std.testing.expect(OpType == TestSystem.Operation);
+
+    const op: OpType = .put;
+    try std.testing.expect(op == .put);
+}
+
+test "discover_operation_type with OpType enum" {
+    const TestSystem = struct {
+        pub const OpType = enum { read, write };
+    };
+
+    const OpType = discover_operation_type(TestSystem);
+    try std.testing.expect(OpType == TestSystem.OpType);
+}
+
+test "discover_operation_type with Operations enum" {
+    const TestSystem = struct {
+        pub const Operations = enum { start, stop, restart };
+    };
+
+    const OpType = discover_operation_type(TestSystem);
+    try std.testing.expect(OpType == TestSystem.Operations);
+}
+
+test "discover_operation_type with CoreSimOperations enum" {
+    const TestSystem = struct {
+        pub const CoreSimOperations = enum { init_op, cleanup_op };
+    };
+
+    const OpType = discover_operation_type(TestSystem);
+    try std.testing.expect(OpType == TestSystem.CoreSimOperations);
+}
+
+test "has_method utility function" {
+    const TestSystem = struct {
+        pub fn existing_method(_: *@This()) void {}
+        // no non_existing_method
+    };
+
+    try std.testing.expect(has_method(TestSystem, "existing_method"));
+    try std.testing.expect(!has_method(TestSystem, "non_existing_method"));
+}
+
+test "get_method_info utility function" {
+    const TestSystem = struct {
+        pub fn test_method(_: *@This(), _: []const u8) void {}
+    };
+
+    const method_info = get_method_info(TestSystem, "test_method");
+    try std.testing.expect(method_info.params.len == 2); // self + key parameter
+}
+
+test "validate_system_type with valid system" {
+    const ValidSystem = struct {
+        pub const Operation = enum { op1, op2 };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    // Should compile without error
+    validate_system_type(ValidSystem);
+}
+
+test "call_method_with_operation single parameter" {
+    const TestSystem = struct {
+        called: bool = false,
+
+        pub const Operation = enum { test_op };
+
+        pub fn single_param_method(self: *@This()) void {
+            self.called = true;
+        }
+    };
+
+    var system = TestSystem{};
+    const operation = property_testing.Operation(TestSystem.Operation){
+        .operation_type = .test_op,
+        .key = null,
+        .value = null,
+    };
+
+    try call_method_with_operation(TestSystem, &system, TestSystem.single_param_method, operation);
+    try std.testing.expect(system.called);
+}
+
+test "call_method_with_operation two parameters" {
+    const TestSystem = struct {
+        last_key: ?[]const u8 = null,
+
+        pub const Operation = enum { test_op };
+
+        pub fn two_param_method(self: *@This(), key: []const u8) void {
+            self.last_key = key;
+        }
+    };
+
+    var system = TestSystem{};
+    const key_data = "test_key";
+    const operation = property_testing.Operation(TestSystem.Operation){
+        .operation_type = .test_op,
+        .key = @constCast(key_data),
+        .value = null,
+    };
+
+    try call_method_with_operation(TestSystem, &system, TestSystem.two_param_method, operation);
+    try std.testing.expect(std.mem.eql(u8, system.last_key.?, "test_key"));
+}
+
+test "call_method_with_operation three parameters" {
+    const TestSystem = struct {
+        last_key: ?[]const u8 = null,
+        last_value: ?[]const u8 = null,
+
+        pub const Operation = enum { test_op };
+
+        pub fn three_param_method(self: *@This(), key: []const u8, value: []const u8) !void {
+            self.last_key = key;
+            self.last_value = value;
+        }
+    };
+
+    var system = TestSystem{};
+    const key_data = "test_key";
+    const value_data = "test_value";
+    const operation = property_testing.Operation(TestSystem.Operation){
+        .operation_type = .test_op,
+        .key = @constCast(key_data),
+        .value = @constCast(value_data),
+    };
+
+    try call_method_with_operation(TestSystem, &system, TestSystem.three_param_method, operation);
+    try std.testing.expect(std.mem.eql(u8, system.last_key.?, "test_key"));
+    try std.testing.expect(std.mem.eql(u8, system.last_value.?, "test_value"));
+}

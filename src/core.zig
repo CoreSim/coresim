@@ -598,3 +598,276 @@ test "Custom invariants functionality" {
         .invariant("counter_range", TestSystem.checkCounterRange, .important)
         .run(std.testing.allocator);
 }
+
+test "TestBuilder builder pattern immutability" {
+    const TestSystem = struct {
+        pub const Operation = enum { op1, op2 };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+        pub fn op1(_: *@This(), _: []const u8, _: []const u8) !void {}
+        pub fn op2(_: *@This(), _: []const u8) ?[]const u8 {
+            return null;
+        }
+    };
+
+    const ops = [_]TestSystem.Operation{ .op1, .op2 };
+
+    // Test that builder pattern preserves immutability
+    const builder1 = TestBuilder(TestSystem){};
+    const builder2 = builder1.operations(&ops);
+    const builder3 = builder2.iterations(10);
+    const builder4 = builder3.seed(12345);
+
+    // Original builders should be unchanged
+    try std.testing.expect(builder1.config.iterations == 100); // default
+    try std.testing.expect(builder2.config.iterations == 100); // still default
+    try std.testing.expect(builder3.config.iterations == 10); // changed
+    try std.testing.expect(builder4.config.iterations == 10); // preserved
+    try std.testing.expect(builder4.config.seed == 12345);
+}
+
+test "TestBuilder operation weights configuration" {
+    const TestSystem = struct {
+        pub const Operation = enum { frequent, rare, medium };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+        pub fn frequent(_: *@This(), _: []const u8, _: []const u8) !void {}
+        pub fn rare(_: *@This(), _: []const u8, _: []const u8) !void {}
+        pub fn medium(_: *@This(), _: []const u8, _: []const u8) !void {}
+    };
+
+    const ops = [_]TestSystem.Operation{ .frequent, .rare, .medium };
+    const weights = [_]OpWeight(TestSystem.Operation){
+        .{ .operation = .frequent, .weight = 0.7 },
+        .{ .operation = .rare, .weight = 0.1 },
+        .{ .operation = .medium, .weight = 0.2 },
+    };
+
+    const builder = TestBuilder(TestSystem){};
+    try builder
+        .operations(&ops)
+        .operation_weights(&weights)
+        .iterations(5)
+        .run(std.testing.allocator);
+}
+
+test "TestBuilder custom failures configuration" {
+    const TestSystem = struct {
+        pub const Operation = enum { put, get };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+
+        pub fn put(_: *@This(), _: []const u8, _: []const u8) !void {
+            // Test injection of custom failures
+            if (should_inject_custom_failure("disk_full")) {
+                return error.DiskFull;
+            }
+            if (should_inject_custom_failure("permission_denied")) {
+                return error.PermissionDenied;
+            }
+        }
+
+        pub fn get(_: *@This(), _: []const u8) ?[]const u8 {
+            return null;
+        }
+    };
+
+    const ops = [_]TestSystem.Operation{ .put, .get };
+    const failures = [_]CustomFailure{
+        .{ .name = "disk_full", .probability = 0.1 },
+        .{ .name = "permission_denied", .probability = 0.05 },
+    };
+
+    const builder = TestBuilder(TestSystem){};
+    try builder
+        .operations(&ops)
+        .custom_failures(&failures)
+        .iterations(10)
+        .run(std.testing.allocator);
+}
+
+test "TestBuilder failure injection configuration" {
+    const TestSystem = struct {
+        pub const Operation = enum { allocate, write, network_call };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+
+        pub fn allocate(_: *@This(), _: []const u8, _: []const u8) !void {
+            // These would fail if failure injection is active
+        }
+
+        pub fn write(_: *@This(), _: []const u8, _: []const u8) !void {}
+
+        pub fn network_call(_: *@This(), _: []const u8, _: []const u8) !void {
+            if (should_inject_network_error()) {
+                return error.NetworkTimeout;
+            }
+        }
+    };
+
+    const ops = [_]TestSystem.Operation{ .allocate, .write, .network_call };
+
+    // Test various failure injection configurations
+    const builder = TestBuilder(TestSystem){};
+    try builder
+        .operations(&ops)
+        .allocator_failures(0.01) // 1% allocator failures
+        .filesystem_errors(0.005) // 0.5% filesystem errors
+        .network_errors(0.02) // 2% network errors
+        .iterations(5)
+        .run(std.testing.allocator);
+}
+
+test "TestBuilder sequence length configuration" {
+    const TestSystem = struct {
+        operations_count: u32 = 0,
+
+        pub const Operation = enum { op1, op2 };
+
+        pub fn init(allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){};
+        }
+
+        pub fn deinit(_: *@This()) void {}
+
+        pub fn op1(self: *@This(), _: []const u8, _: []const u8) !void {
+            self.operations_count += 1;
+        }
+
+        pub fn op2(self: *@This(), _: []const u8, _: []const u8) !void {
+            self.operations_count += 1;
+        }
+
+        pub fn checkOperationsInRange(self: *@This()) bool {
+            // Should be within configured range
+            return self.operations_count >= 5 and self.operations_count <= 15;
+        }
+    };
+
+    const ops = [_]TestSystem.Operation{ .op1, .op2 };
+
+    const builder = TestBuilder(TestSystem){};
+    try builder
+        .operations(&ops)
+        .sequence_length(5, 15) // Between 5 and 15 operations per test
+        .iterations(3)
+        .invariant("ops_in_range", TestSystem.checkOperationsInRange, .important)
+        .run(std.testing.allocator);
+}
+
+test "should_inject_custom_failure function" {
+    // Test with no active configuration
+    try std.testing.expect(!should_inject_custom_failure("test_failure"));
+
+    // Test with active configuration
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var config = failure_injection.FailureInjectionConfig.init(allocator);
+    defer config.deinit();
+
+    try config.set_custom_probability(allocator, "test_failure", 1.0); // 100% probability
+
+    var prng = std.Random.DefaultPrng.init(12345);
+
+    current_failure_config = &config;
+    current_prng = &prng;
+    defer {
+        current_failure_config = null;
+        current_prng = null;
+    }
+
+    // Should inject at 100% probability
+    try std.testing.expect(should_inject_custom_failure("test_failure"));
+
+    // Non-configured failure should not inject
+    try std.testing.expect(!should_inject_custom_failure("unknown_failure"));
+}
+
+test "should_inject_network_error function" {
+    // Test with no active configuration
+    try std.testing.expect(!should_inject_network_error());
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var config = failure_injection.FailureInjectionConfig.init(allocator);
+    defer config.deinit();
+
+    config.network_error_probability = 1.0; // 100% probability
+
+    var prng = std.Random.DefaultPrng.init(12345);
+
+    current_failure_config = &config;
+    current_prng = &prng;
+    defer {
+        current_failure_config = null;
+        current_prng = null;
+    }
+
+    // Should inject at 100% probability
+    try std.testing.expect(should_inject_network_error());
+}
+
+test "system condition management" {
+    // Test initial state
+    try std.testing.expect(current_system_condition() == null);
+
+    // Test setting condition
+    set_system_condition(.during_flush);
+    try std.testing.expect(current_system_condition() == .during_flush);
+
+    // Test changing condition
+    set_system_condition(.during_recovery);
+    try std.testing.expect(current_system_condition() == .during_recovery);
+
+    // Test clearing condition
+    set_system_condition(null);
+    try std.testing.expect(current_system_condition() == null);
+}
+
+test "OpWeight type functionality" {
+    const TestOp = enum { op1, op2, op3 };
+
+    const weight1 = OpWeight(TestOp){ .operation = .op1, .weight = 0.5 };
+    const weight2 = OpWeight(TestOp){ .operation = .op2, .weight = 0.3 };
+    const weight3 = OpWeight(TestOp){ .operation = .op3, .weight = 0.2 };
+
+    try std.testing.expect(weight1.operation == .op1);
+    try std.testing.expect(weight1.weight == 0.5);
+    try std.testing.expect(weight2.weight == 0.3);
+    try std.testing.expect(weight3.weight == 0.2);
+}
+
+test "CustomFailure type functionality" {
+    const failure1 = CustomFailure{ .name = "disk_full", .probability = 0.1 };
+    const failure2 = CustomFailure{ .name = "network_timeout", .probability = 0.05 };
+
+    try std.testing.expect(std.mem.eql(u8, failure1.name, "disk_full"));
+    try std.testing.expect(failure1.probability == 0.1);
+    try std.testing.expect(std.mem.eql(u8, failure2.name, "network_timeout"));
+    try std.testing.expect(failure2.probability == 0.05);
+}

@@ -838,3 +838,224 @@ test "Key generation strategies" {
     defer allocator.free(key2);
     try std.testing.expect(key2.len > 0);
 }
+
+test "Range validation" {
+    const valid_range = Range{ .min = 5, .max = 10 };
+    const invalid_range = Range{ .min = 10, .max = 5 };
+    const equal_range = Range{ .min = 5, .max = 5 };
+
+    try std.testing.expect(valid_range.validate());
+    try std.testing.expect(!invalid_range.validate());
+    try std.testing.expect(equal_range.validate());
+}
+
+test "Range sampling edge cases" {
+    var prng = std.Random.DefaultPrng.init(12345);
+
+    // Test single value range
+    const single_value = Range{ .min = 42, .max = 42 };
+    try std.testing.expect(single_value.sample(&prng) == 42);
+
+    // Test small range
+    const small_range = Range{ .min = 0, .max = 1 };
+    for (0..20) |_| {
+        const sample = small_range.sample(&prng);
+        try std.testing.expect(sample >= 0 and sample <= 1);
+    }
+}
+
+test "Operation creation and cleanup" {
+    const TestOp = enum { put, get, delete };
+    const allocator = std.testing.allocator;
+
+    var operation = Operation(TestOp){
+        .operation_type = .put,
+        .key = try allocator.dupe(u8, "test_key"),
+        .value = try allocator.dupe(u8, "test_value"),
+    };
+
+    try std.testing.expect(std.mem.eql(u8, operation.key.?, "test_key"));
+    try std.testing.expect(std.mem.eql(u8, operation.value.?, "test_value"));
+
+    // Cleanup should not leak memory
+    operation.deinit(allocator);
+}
+
+test "OperationDistribution basic functionality" {
+    const TestOp = enum { frequent, rare, medium };
+
+    var dist = OperationDistribution(TestOp).init();
+    dist.set_weight(.frequent, 0.7);
+    dist.set_weight(.rare, 0.1);
+    dist.set_weight(.medium, 0.2);
+
+    var prng = std.Random.DefaultPrng.init(42);
+
+    // Test sampling produces valid operations
+    for (0..100) |_| {
+        const op = dist.sample(&prng);
+        const is_valid = (op == .frequent or op == .rare or op == .medium);
+        try std.testing.expect(is_valid);
+    }
+}
+
+test "OperationDistribution normalization" {
+    const TestOp = enum { op1, op2 };
+
+    var dist = OperationDistribution(TestOp).init();
+    dist.set_weight(.op1, 200.0); // Large unnormalized weights
+    dist.set_weight(.op2, 800.0);
+
+    dist.normalize();
+
+    // After normalization, weights should sum to 1.0
+    const weight1 = dist.weights.get(.op1).?;
+    const weight2 = dist.weights.get(.op2).?;
+    const sum = weight1 + weight2;
+
+    try std.testing.expect(@abs(sum - 1.0) < 0.0001); // Float precision tolerance
+    try std.testing.expect(@abs(weight1 - 0.2) < 0.0001); // Should be 200/1000 = 0.2
+    try std.testing.expect(@abs(weight2 - 0.8) < 0.0001); // Should be 800/1000 = 0.8
+}
+
+test "ValueGenerationStrategy fixed size" {
+    var prng = std.Random.DefaultPrng.init(42);
+    const allocator = std.testing.allocator;
+
+    const strategy = ValueGenerationStrategy{ .fixed_size = 100 };
+    const value = try strategy.generate_value(allocator, &prng);
+    defer allocator.free(value);
+
+    try std.testing.expect(value.len == 100);
+}
+
+test "ValueGenerationStrategy variable size" {
+    var prng = std.Random.DefaultPrng.init(42);
+    const allocator = std.testing.allocator;
+
+    const strategy = ValueGenerationStrategy{ .variable_size = .{ .min = 50, .max = 150 } };
+    const value = try strategy.generate_value(allocator, &prng);
+    defer allocator.free(value);
+
+    try std.testing.expect(value.len >= 50 and value.len <= 150);
+}
+
+test "InvariantSeverity enum completeness" {
+    const severities = [_]InvariantSeverity{ .critical, .important, .advisory };
+
+    for (severities) |severity| {
+        // Test that all severities are valid and accessible
+        const is_valid = (severity == .critical or severity == .important or severity == .advisory);
+        try std.testing.expect(is_valid);
+    }
+}
+
+test "TestStatistics initialization and basic operations" {
+    var stats = TestStatistics.init(std.testing.allocator);
+    defer stats.deinit();
+
+    try std.testing.expect(stats.total_operations_generated == 0);
+    try std.testing.expect(stats.invariant_violations == 0);
+    try std.testing.expect(stats.test_execution_time == 0);
+
+    stats.total_operations_generated = 100;
+    stats.invariant_violations = 2;
+    stats.test_execution_time = 1000000;
+
+    try std.testing.expect(stats.total_operations_generated == 100);
+    try std.testing.expect(stats.invariant_violations == 2);
+    try std.testing.expect(stats.test_execution_time == 1000000);
+}
+
+test "TestStatistics with detailed stats" {
+    var stats = TestStatistics.initWithDetailedStats(std.testing.allocator, true);
+    defer stats.deinit();
+
+    try std.testing.expect(stats.detailed_stats_enabled);
+    // Detailed stats should initialize properly without crashing
+}
+
+test "FailureStats basic functionality" {
+    var stats = FailureStats.init(std.testing.allocator);
+    defer stats.deinit();
+
+    try std.testing.expect(stats.allocator_failures_injected == 0);
+    try std.testing.expect(stats.filesystem_errors_injected == 0);
+    try std.testing.expect(stats.network_errors_injected == 0);
+
+    stats.allocator_failures_injected = 10;
+    stats.filesystem_errors_injected = 5;
+    stats.network_errors_injected = 8;
+
+    try std.testing.expect(stats.allocator_failures_injected == 10);
+    try std.testing.expect(stats.filesystem_errors_injected == 5);
+    try std.testing.expect(stats.network_errors_injected == 8);
+}
+
+test "FailureStats custom failure recording" {
+    var stats = FailureStats.init(std.testing.allocator);
+    defer stats.deinit();
+
+    try stats.record_custom_failure("disk_full");
+    try stats.record_custom_failure("disk_full");
+    try stats.record_custom_failure("network_timeout");
+
+    try std.testing.expect(stats.custom_failures_injected.get("disk_full").? == 2);
+    try std.testing.expect(stats.custom_failures_injected.get("network_timeout").? == 1);
+    try std.testing.expect(stats.custom_failures_injected.get("unknown") == null);
+}
+
+test "InvariantChecker basic functionality" {
+    const TestSystem = struct {
+        value: u32 = 0,
+
+        pub fn checkPositive(self: *@This()) bool {
+            return self.value > 0;
+        }
+
+        pub fn checkRange(self: *@This()) bool {
+            return self.value < 100;
+        }
+    };
+
+    var system = TestSystem{ .value = 50 };
+
+    const checker1 = InvariantChecker(TestSystem){
+        .name = "positive",
+        .check_fn = TestSystem.checkPositive,
+        .severity = .important,
+    };
+
+    const checker2 = InvariantChecker(TestSystem){
+        .name = "range",
+        .check_fn = TestSystem.checkRange,
+        .severity = .critical,
+    };
+
+    try std.testing.expect(checker1.check(&system));
+    try std.testing.expect(checker2.check(&system));
+
+    system.value = 0;
+    try std.testing.expect(!checker1.check(&system)); // Not positive anymore
+    try std.testing.expect(checker2.check(&system)); // Still in range
+}
+
+test "PropertyTestingError enum completeness" {
+    const errors = [_]PropertyTestingError{
+        PropertyTestingError.TestFailed,
+        PropertyTestingError.InvariantViolation,
+        PropertyTestingError.ShrinkingFailed,
+        PropertyTestingError.StatisticsError,
+        PropertyTestingError.GenerationError,
+    };
+
+    for (errors) |_| {
+        // Test that all error types are accessible
+    }
+}
+
+test "Duration type alias" {
+    const duration: Duration = 1000000; // 1 million nanoseconds
+    try std.testing.expect(duration == 1000000);
+    try std.testing.expect(@TypeOf(duration) == u64);
+}
